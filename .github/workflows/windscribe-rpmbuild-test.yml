@@ -1,0 +1,193 @@
+# Build + install-test: rewrap the upstream Windscribe RPMs with Fedora specs
+name: windscribe Fedora RPM build + install test
+on: workflow_dispatch
+env:
+  REPO_DEV: Windscribe
+  REPO_NAME: Desktop-App
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: windscribe
+            artifact_glob: "windscribe_*_amd64_fedora.rpm"
+            platform: linux_rpm_x64
+            metadata: com.windscribe.desktop.metainfo.xml
+            # Additions allowed on top of the upstream payload: the packaged
+            # license/README, the sysusers entry, the generated platform marker,
+            # the /usr/bin symlink and the curated AppStream metadata.
+            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe|usr/share/doc/windscribe/README\.md|usr/share/licenses|usr/share/licenses/windscribe|usr/share/licenses/windscribe/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|usr/share/metainfo|usr/share/metainfo/com\.windscribe\.desktop\.metainfo\.xml|etc|etc/windscribe|etc/windscribe/platform)$'
+          - package: windscribe-cli
+            artifact_glob: "windscribe-cli_*_amd64_fedora.rpm"
+            platform: linux_rpm_x64_cli
+            metadata: ""
+            # Same as above minus the AppStream metadata (the CLI build ships
+            # neither a desktop file nor metadata). %doc/%license land under
+            # this package's own name, so those paths differ from the GUI build.
+            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|etc|etc/windscribe|etc/windscribe/platform)$'
+    steps:
+      # fedora:44 ships no git, so actions/checkout would silently fall back to
+      # downloading a source tarball and leave no .git behind.
+      - name: Install git
+        run: sudo dnf install -y -q git
+      - name: Checkout local
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: ${{ github.repository }}
+      # Steps run as root inside the container while the bind-mounted workspace
+      # is owned by the runner user (uid 1001), so git rejects the repository as
+      # dubiously owned. actions/checkout only records safe.directory in a
+      # temporary global config that it reverts.
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install dependencies
+        run: sudo dnf install -y -q git gawk jq curl rpm-build rpmdevtools cpio desktop-file-utils appstream rpmlint systemd-rpm-macros
+      - name: Get latest version
+        id: step_version
+        run: |
+          latest_release_tag=$(curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/$REPO_DEV/$REPO_NAME/releases/latest | jq -r '.tag_name // empty')
+          if [ -z "$latest_release_tag" ]; then echo "ERROR: tag empty"; exit 1; fi
+          version_no_v=$(echo "$latest_release_tag" | sed 's/^v//')
+          echo "VERSION_NO_V=$version_no_v" >> "$GITHUB_OUTPUT"
+      - name: Patch spec and appdata version
+        env:
+          METADATA: ${{ matrix.metadata }}
+        run: |
+          sed -i "s/^Version:.*/Version:        ${{ steps.step_version.outputs.VERSION_NO_V }}/" specs/${{ matrix.package }}.spec
+          if [ -n "$METADATA" ]; then
+            sed -i "s|<release version=\"[^\"]*\" date=\"[^\"]*\"|<release version=\"${{ steps.step_version.outputs.VERSION_NO_V }}\" date=\"$(date +%F)\"|" sources/$METADATA
+          fi
+          head -18 specs/${{ matrix.package }}.spec
+      - name: Validate curated AppStream metadata
+        env:
+          METADATA: ${{ matrix.metadata }}
+        run: |
+          if [ -n "$METADATA" ]; then
+            appstreamcli validate --no-net sources/$METADATA
+          else
+            echo "no packaged metadata for ${{ matrix.package }}"
+          fi
+      - name: Build RPM locally
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          rpmdev-setuptree
+          # spectool fetches the upstream RPM (Source0) and LICENSE (Source1,
+          # from the release tag). No fallback: a failed fetch fails the build.
+          cp sources/windscribe.sysusers.conf sources/com.windscribe.desktop.metainfo.xml README.md $HOME/rpmbuild/SOURCES/
+          cp specs/$PACKAGE.spec $HOME/rpmbuild/SPECS/
+          cd $HOME/rpmbuild/SPECS
+          spectool -g -R $PACKAGE.spec
+          rpmbuild -ba $PACKAGE.spec 2>&1 | tail -15
+          ls -lh $HOME/rpmbuild/RPMS/x86_64/
+      - name: Verify the payload matches upstream apart from the documented deltas
+        env:
+          ALLOWED_ADDITIONS: ${{ matrix.allowed_additions }}
+          ARTIFACT_GLOB: ${{ matrix.artifact_glob }}
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          # The contract is that every file the upstream RPM ships is packaged
+          # byte for byte; the only intended deltas are the documented additions
+          # (see README). Fedora's default brp hooks rewrite any ELF they see and
+          # check-rpaths rejects the bundle's RUNPATH, so without this check a
+          # silent macro change would only show up as a quietly different binary.
+          upstream=$(ls $HOME/rpmbuild/SOURCES/$ARTIFACT_GLOB | head -1)
+          built=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.rpm | grep -v debug | head -1)
+          rm -rf /tmp/payload-upstream /tmp/payload-built
+          mkdir -p /tmp/payload-upstream /tmp/payload-built
+          (cd /tmp/payload-upstream && rpm2cpio "$upstream" | cpio -idm --quiet)
+          (cd /tmp/payload-built && rpm2cpio "$built" | cpio -idm --quiet)
+          out=$(diff -rq /tmp/payload-upstream /tmp/payload-built 2>&1 || true)
+          fail=0
+          content=$(printf '%s\n' "$out" | grep ' differ$' || true)
+          missing=$(printf '%s\n' "$out" | grep '^Only in /tmp/payload-upstream' || true)
+          additions=$(printf '%s\n' "$out" | grep '^Only in /tmp/payload-built' || true)
+          if [ -n "$content" ]; then
+            echo "ERROR: payload content drifted from upstream:"
+            printf '%s\n' "$content"
+            fail=1
+          fi
+          if [ -n "$missing" ]; then
+            echo "ERROR: files the upstream RPM ships are missing from the package:"
+            printf '%s\n' "$missing"
+            fail=1
+          fi
+          while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            rel=$(printf '%s' "$line" | sed -e 's|^Only in /tmp/payload-built|.|' -e 's|: |/|')
+            if printf '%s\n' "$rel" | grep -qE "$ALLOWED_ADDITIONS"; then
+              echo "documented addition: $rel"
+            else
+              echo "ERROR: undocumented addition: $rel"
+              fail=1
+            fi
+          done <<< "$additions"
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "### Payload matches upstream apart from the documented additions :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY
+      - name: Inspect built RPM Requires
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
+          echo "=== Built RPM: $rpm_file ==="
+          rpm -qpR "$rpm_file"
+          echo "REQUIRES_OUTPUT_END"
+      - name: Validate packaged desktop, AppStream metadata and units
+        env:
+          PACKAGE: ${{ matrix.package }}
+          METADATA: ${{ matrix.metadata }}
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
+          rm -rf /tmp/rpmbuild-check
+          mkdir -p /tmp/rpmbuild-check
+          cd /tmp/rpmbuild-check
+          rpm2cpio "$rpm_file" | cpio -idmu --quiet
+          systemd-analyze verify usr/lib/systemd/system/windscribe-helper.service
+          if [ "$PACKAGE" = "windscribe" ]; then
+            desktop-file-validate usr/share/applications/windscribe.desktop
+            appstreamcli validate --no-net usr/share/metainfo/com.windscribe.desktop.metainfo.xml
+          else
+            systemd-analyze verify usr/lib/systemd/user/windscribe.service
+          fi
+      - name: Run rpmlint
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
+          rpmlint -r "$GITHUB_WORKSPACE/rpmlintrc" "$rpm_file"
+      - name: Install-test the rebuilt RPM
+        env:
+          PACKAGE: ${{ matrix.package }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
+          echo "=== Installing $rpm_file (expect the declared tools + libs pulled) ==="
+          dnf in -y "$rpm_file" 2>&1 | tail -30
+          rpm -q "$PACKAGE"
+          rpm -V "$PACKAGE"
+          # The account must exist before the payload lands, because the client
+          # binary is group-owned by it (%attr in the spec, upstream's chgrp in
+          # a scriptlet).
+          getent group windscribe >/dev/null || { echo "ERROR: group windscribe missing"; exit 1; }
+          getent passwd windscribe >/dev/null || { echo "ERROR: user windscribe missing"; exit 1; }
+          mode_group=$(stat -c '%a %G' /opt/windscribe/Windscribe)
+          if [ "$mode_group" != "2755 windscribe" ]; then
+            echo "ERROR: /opt/windscribe/Windscribe is '$mode_group', expected '2755 windscribe'"
+            exit 1
+          fi
+          [ "$(readlink /usr/bin/windscribe-cli)" = "/opt/windscribe/windscribe-cli" ] || { echo "ERROR: /usr/bin/windscribe-cli symlink wrong"; exit 1; }
+          if [ "$(cat /etc/windscribe/platform)" != "$PLATFORM" ]; then
+            echo "ERROR: /etc/windscribe/platform is '$(cat /etc/windscribe/platform)', expected '$PLATFORM'"
+            exit 1
+          fi
+          if [ "$PACKAGE" = "windscribe" ]; then
+            desktop-file-validate /usr/share/applications/windscribe.desktop
+            appstreamcli validate --no-net /usr/share/metainfo/com.windscribe.desktop.metainfo.xml
+          else
+            systemd-analyze verify /usr/lib/systemd/user/windscribe.service
+          fi
+          systemd-analyze verify /usr/lib/systemd/system/windscribe-helper.service
+          echo "### Install test passed ($PACKAGE) :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY

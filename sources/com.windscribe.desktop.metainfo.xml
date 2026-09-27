@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.windscribe.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-only</project_license>
+  <name>Windscribe</name>
+  <summary>VPN client with a desktop GUI</summary>
+  <description>
+    <p>Windscribe is a VPN service client. It connects through WireGuard,
+    OpenVPN or AmneziaWG, manages DNS and firewall rules while a tunnel is up,
+    and lets you pick locations, set up split tunneling and keep the usual
+    per-session options in one window.</p>
+    <p>The client talks to a privileged helper service, which performs the
+    network configuration changes on its behalf.</p>
+  </description>
+  <categories>
+    <category>Network</category>
+  </categories>
+  <developer id="com.windscribe">
+    <name>Windscribe Limited</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <url type="homepage">https://windscribe.com</url>
+  <launchable type="desktop-id">windscribe.desktop</launchable>
+  <provides>
+    <binary>Windscribe</binary>
+  </provides>
+  <releases>
+    <release version="2.24.13" date="2026-09-27"/>
+  </releases>
+</component>

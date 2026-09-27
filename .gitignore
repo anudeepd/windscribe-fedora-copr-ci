@@ -1,0 +1,9 @@
+node_modules/
+dist/
+target/
+*.rpm
+*.tar.gz
+.DS_Store
+*~
+.vscode/
+.idea/

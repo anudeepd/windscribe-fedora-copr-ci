@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Inherent findings of a prebuilt-blob rewrap. Every filter here documents a
+# fact of the upstream RPM that this repo ships as-is; anything not listed
+# breaks the rpmlint step in the RPM build test workflow.
+# ---------------------------------------------------------------------------
+
+# /opt/windscribe is upstream's layout (a Qt app plus its helper, VPN engines
+# and bundled libs). The payload must ship with its paths intact: this is a
+# COPR-only rewrap and is never eligible for the official Fedora repositories.
+addFilter("dir-or-file-in-opt")
+
+# The bundle's ELF files carry RUNPATH=/opt/windscribe/lib. It is required:
+# libwsnet.so, libcrypto.so.4 and libssl.so.4 ship inside the bundle and Fedora
+# has no provider for the .so.4 OpenSSL SONAMEs at all, so this is the only
+# path by which the loader finds them. See the note in specs/*.spec.
+addFilter("binary-or-shlib-defines-rpath")
+
+# The prebuilt upstream binaries carry .symtab/.comment by design; see the
+# rationale next to %global debug_package %{nil} in specs/*.spec.
+addFilter("unstripped-binary-or-object")
+
+# windscribectrld is a statically linked Go binary upstream ships as part of
+# the VPN engine set.
+addFilter("statically-linked-binary")
+
+# Upstream's %post chgrps /opt/windscribe/Windscribe to the windscribe group
+# and chmods it 2755 so any user running the client picks up group access to
+# the helper's runtime files. This package records the same mode and group in
+# %files instead of applying them from a scriptlet (see the %attr line).
+addFilter("setgid-binary")
+addFilter("non-standard-gid")
+addFilter("non-standard-executable-perm")
+# rpmlint's setgroups pattern expects a setuid dropper; these are ordinary Qt
+# client binaries whose egid is fixed by the mode above, not privileged code.
+addFilter("missing-call-to-setgroups-before-setuid")
+
+# libwsnet.so's SONAME is the unversioned "libwsnet.so", which is exactly what
+# the bundle's DT_NEEDED entries name. The library is private to /opt/windscribe
+# and is never resolved from the system loader path.
+addFilter("invalid-soname")
+
+# The GPL-2.0 text fetched from upstream's release tag still carries the old
+# FSF address; it is shipped verbatim, like upstream's own RPM does.
+addFilter("incorrect-fsf-address")
+
+# OpenSSL/BoringSSL inside the bundle call gethostbyname, and use TLS defaults
+# from the upstream build rather than Fedora's crypto policy. Both are inherent
+# to the prebuilt blob.
+addFilter("binary-or-shlib-calls-gethostbyname")
+addFilter("crypto-policy-non-compliance-openssl")
+
+# The bundle is built without -fPIE upstream; rebuilding it is out of scope for
+# a rewrap.
+addFilter("position-independent-executable-suggested")
+
+# Upstream ships no man page, and /etc/windscribe/platform is state the helper
+# reads back (upstream rewrites it from %post on every install), so it is not
+# a user-editable config file.
+addFilter("no-manual-page-for-binary")
+addFilter("non-conffile-in-etc")
+
+# %postun removes /var/log/windscribe and /var/lib/windscribe, which the helper
+# creates at runtime and which no package owns; upstream's postuninstall does
+# the same (plus userdel/groupdel, which Fedora's guidelines forbid).
+addFilter("dangerous-command-in-%postun")
+
+# "rewraps"/"rewrapped" and "prebuilt" appear in %description; rpmlint's
+# dictionary has no entry for them.
+addFilter("spelling-error .*rewrap")
+addFilter("spelling-error .*prebuilt")

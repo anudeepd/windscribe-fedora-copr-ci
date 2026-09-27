@@ -1,0 +1,10 @@
+# SHA256SUMS for the upstream Windscribe release artifacts.
+# Format: <sha256>  <package>  <version>
+# CI records each version's hash on first sight (trust-on-first-use) and fails
+# subsequent builds if the downloaded artifact does not match the recorded hash.
+# Package is the SRPM/COPR package name: windscribe (GUI build) downloads
+# windscribe_<version>_amd64_fedora.rpm, windscribe-cli downloads
+# windscribe-cli_<version>_amd64_fedora.rpm.
+
+7f37792789fea5299325f4b121cb3a347c088fa38d5311f4f13aaac3684c30f8  windscribe  2.24.13
+e67e642e21d02da32b1329c7c230f5570f296f4a59fa898dcef242eee1f02cbe  windscribe-cli  2.24.13
