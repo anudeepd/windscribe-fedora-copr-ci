@@ -148,6 +148,13 @@ sudo dnf copr enable anudeepd/windscribe
 sudo dnf install windscribe-cli
 </pre>
 
+Both packages are available for x86_64 and aarch64 and are mutually exclusive
+(both install `/opt/windscribe`), so install exactly one. Updates arrive through
+dnf like any other package. Note that Windscribe's in-app updater installs the
+upstream vendor RPM, which carries the same package name: it is the same version
+stream, and the COPR NVRs (release `-1` and up) stay ahead of it, so dnf keeps
+resolving fresh installs to the COPR build.
+
 ## Credits
 
 Pattern and workflow structure adapted from
