@@ -151,20 +151,6 @@ cp %{SOURCE5} README.md
 cp -a etc opt usr %{buildroot}/
 install -Dm0644 %{SOURCE3} %{buildroot}%{_metainfodir}/com.windscribe.desktop.metainfo.xml
 install -Dm0644 %{SOURCE4} %{buildroot}%{_sysusersdir}/windscribe.conf
-# Upstream's %post writes this per-architecture marker that its self-update
-# script reads back (the values come from the scriptlets in each architecture's
-# RPM). Ship the same content as a file instead of generating it in a scriptlet.
-%ifarch x86_64
-printf 'linux_rpm_x64\n' > %{buildroot}/etc/windscribe/platform
-%endif
-%ifarch aarch64
-printf 'linux_rpm_arm64\n' > %{buildroot}/etc/windscribe/platform
-%endif
-chmod 0644 %{buildroot}/etc/windscribe/platform
-# Upstream's %post creates this symlink; own it in %%files instead so rpm
-# tracks what the package puts on PATH.
-install -d %{buildroot}%{_bindir}
-ln -s /opt/windscribe/windscribe-cli %{buildroot}%{_bindir}/windscribe-cli
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/windscribe.desktop
@@ -173,7 +159,6 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/com.windscribe.deskto
 %files
 %license LICENSE
 %doc README.md
-%{_bindir}/windscribe-cli
 # Upstream chgrps this binary to the windscribe group and chmods it 2755 in
 # %post so any user running the GUI picks up group access to the helper. Same
 # result as %attr, but recorded in the package instead of applied by a script.
@@ -196,7 +181,6 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/com.windscribe.deskto
 /usr/lib/.build-id/
 # Upstream marks this autostart entry as a config file.
 %config(noreplace) /etc/windscribe/autostart/windscribe.desktop
-/etc/windscribe/platform
 %{_sysusersdir}/windscribe.conf
 %{_unitdir}/windscribe-helper.service
 %{_presetdir}/69-windscribe-helper.preset
@@ -212,6 +196,20 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/com.windscribe.deskto
 # unique, higher release).
 
 %post
+# /usr/bin/windscribe-cli and /etc/windscribe/platform are created here and left
+# unowned, exactly as upstream does it. Owning them would break an in-app
+# update: when the vendor RPM (which does not own them) replaces this package,
+# rpm deletes them *after* the vendor's %post recreated them, which would take
+# windscribe-cli off PATH and leave the self-update script without its platform
+# marker (it then falls back to a Debian value and tries apt).
+ln -sf /opt/windscribe/windscribe-cli %{_bindir}/windscribe-cli
+mkdir -p /etc/windscribe
+%ifarch x86_64
+printf 'linux_rpm_x64\n' > /etc/windscribe/platform
+%endif
+%ifarch aarch64
+printf 'linux_rpm_arm64\n' > /etc/windscribe/platform
+%endif
 %systemd_post windscribe-helper.service
 # Upstream's posttrans restarts the helper on every install/upgrade; the preset
 # applied above only covers the next boot, so bring it up now as well.
@@ -232,7 +230,9 @@ if [ $1 -eq 0 ]; then
     killall -q Windscribe || :
     # The packaged files are gone by now; these are runtime state the helper
     # creates (and the /opt tree rpm leaves behind once empty), so remove them
-    # here as upstream's postuninstall does.
+    # here as upstream's postuninstall does. /usr/bin/windscribe-cli is created
+    # by %post and unowned, so it needs removing explicitly too.
+    rm -f %{_bindir}/windscribe-cli
     rm -rf /etc/windscribe /opt/windscribe /var/log/windscribe /var/lib/windscribe
     # The windscribe account is deliberately left behind: Fedora's guidelines
     # say packages must not delete users/groups on uninstall (upstream runs
@@ -246,6 +246,12 @@ fi
 %systemd_postun_with_restart windscribe-helper.service
 
 %changelog
+* Sun Sep 27 2026 Anudeep D <anudeepd2@gmail.com> - 2.24.13-1
+- Create /usr/bin/windscribe-cli and /etc/windscribe/platform from %post and
+  leave them unowned, as upstream does. Owning them made rpm delete them after
+  the vendor RPM's %post recreated them when an in-app update replaced this
+  package: windscribe-cli disappeared from PATH and the self-update script fell
+  back to a Debian platform value and tried apt
 * Sun Sep 27 2026 Anudeep D <anudeepd2@gmail.com> - 2.24.13-1
 - Initial Fedora repackaging of the upstream prebuilt Fedora RPM (GUI build)
 - Replace upstream's scriptlets with rpm-owned payload: sysusers entry for the

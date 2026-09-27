@@ -110,11 +110,17 @@ their effects are expressed declaratively instead:
   rpm creates it before the payload is installed, so
   `%attr(2755,root,windscribe) /opt/windscribe/Windscribe` resolves (upstream's
   `chgrp` + `chmod 2755` did the same from `%post`).
-- `/usr/bin/windscribe-cli` and `/etc/windscribe/platform` are owned by
-  `%files` instead of being created by a scriptlet. The marker carries the
-  architecture as upstream's scriptlets spell it: `linux_rpm_x64` /
-  `linux_rpm_x64_cli` on x86_64, `linux_rpm_arm64` / `linux_rpm_arm64_cli` on
-  aarch64.
+- `/usr/bin/windscribe-cli` and `/etc/windscribe/platform` are created from
+  `%post` and deliberately left unowned, exactly as upstream does it. They must
+  not be packaged files: when the vendor RPM (which does not own them) replaces
+  this package during an in-app update, rpm deletes every file the old package
+  owned that the new one does not — and that cleanup runs *after* the vendor's
+  `%post` recreated them, which would drop `windscribe-cli` from PATH and leave
+  the self-update script without its platform marker (it then falls back to a
+  Debian value and tries `apt`). `%postun` removes the symlink on uninstall. The
+  marker carries the architecture as upstream's scriptlets spell it:
+  `linux_rpm_x64` / `linux_rpm_x64_cli` on x86_64, `linux_rpm_arm64` /
+  `linux_rpm_arm64_cli` on aarch64.
 - `/usr/lib/.build-id/` is packaged as upstream ships it: both architectures'
   RPMs carry build-id links for the bundle's ELF files (the hashes differ, since
   the binaries do).

@@ -53,16 +53,16 @@ addFilter("crypto-policy-non-compliance-openssl")
 # a rewrap.
 addFilter("position-independent-executable-suggested")
 
-# Upstream ships no man page, and /etc/windscribe/platform is state the helper
-# reads back (upstream rewrites it from %post on every install), so it is not
-# a user-editable config file.
-addFilter("no-manual-page-for-binary")
-addFilter("non-conffile-in-etc")
+# %post creates /usr/bin/windscribe-cli with ln -sf, mirroring upstream's own
+# scriptlet (see the note there: owning that path would break an in-app update).
+addFilter("dangerous-command-in-%post")
 
-# %postun removes /var/log/windscribe and /var/lib/windscribe, which the helper
-# creates at runtime and which no package owns; upstream's postuninstall does
-# the same (plus userdel/groupdel, which Fedora's guidelines forbid).
-addFilter("dangerous-command-in-%postun")
+# Note: no filter for dangerous-command-in-%postun. The check stopped firing
+# once /usr/bin/windscribe-cli and /etc/windscribe/platform were no longer
+# packaged files (it evidently only flags removals of owned paths), and rpmlint
+# reports a filter that matches nothing as an error, so none is kept. The
+# removal of the unowned runtime state stays; upstream's postuninstall does the
+# same, plus userdel/groupdel, which Fedora's guidelines forbid.
 
 # "rewraps"/"rewrapped" and "prebuilt" appear in %description; rpmlint's
 # dictionary has no entry for them.

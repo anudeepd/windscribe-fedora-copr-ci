@@ -25,14 +25,14 @@ jobs:
             # Additions allowed on top of the upstream payload: the packaged
             # license/README, the sysusers entry, the generated platform marker,
             # the /usr/bin symlink and the curated AppStream metadata.
-            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe|usr/share/doc/windscribe/README\.md|usr/share/licenses|usr/share/licenses/windscribe|usr/share/licenses/windscribe/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|usr/share/metainfo|usr/share/metainfo/com\.windscribe\.desktop\.metainfo\.xml|etc|etc/windscribe|etc/windscribe/platform)$'
+            allowed_additions: '^\./(usr/share|usr/share/doc|usr/share/doc/windscribe|usr/share/doc/windscribe/README\.md|usr/share/licenses|usr/share/licenses/windscribe|usr/share/licenses/windscribe/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|usr/share/metainfo|usr/share/metainfo/com\.windscribe\.desktop\.metainfo\.xml)$'
           - package: windscribe
             arch: aarch64
             file_arch: arm64
             platform: linux_rpm_arm64
             metadata: com.windscribe.desktop.metainfo.xml
             install_test: false
-            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe|usr/share/doc/windscribe/README\.md|usr/share/licenses|usr/share/licenses/windscribe|usr/share/licenses/windscribe/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|usr/share/metainfo|usr/share/metainfo/com\.windscribe\.desktop\.metainfo\.xml|etc|etc/windscribe|etc/windscribe/platform)$'
+            allowed_additions: '^\./(usr/share|usr/share/doc|usr/share/doc/windscribe|usr/share/doc/windscribe/README\.md|usr/share/licenses|usr/share/licenses/windscribe|usr/share/licenses/windscribe/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|usr/share/metainfo|usr/share/metainfo/com\.windscribe\.desktop\.metainfo\.xml)$'
           - package: windscribe-cli
             arch: x86_64
             file_arch: amd64
@@ -42,14 +42,14 @@ jobs:
             # Same as above minus the AppStream metadata (the CLI build ships
             # neither a desktop file nor metadata). %doc/%license land under
             # this package's own name, so those paths differ from the GUI build.
-            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|etc|etc/windscribe|etc/windscribe/platform)$'
+            allowed_additions: '^\./(usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf)$'
           - package: windscribe-cli
             arch: aarch64
             file_arch: arm64
             platform: linux_rpm_arm64_cli
             metadata: ""
             install_test: false
-            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|etc|etc/windscribe|etc/windscribe/platform)$'
+            allowed_additions: '^\./(usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf)$'
     steps:
       # fedora:44 ships no git, so actions/checkout would silently fall back to
       # downloading a source tarball and leave no .git behind.
