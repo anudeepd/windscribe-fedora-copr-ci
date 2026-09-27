@@ -204,12 +204,19 @@ jobs:
           mkdir -p /tmp/rpmbuild-check
           cd /tmp/rpmbuild-check
           rpm2cpio "$rpm_file" | cpio -idmu --quiet
-          systemd-analyze verify usr/lib/systemd/system/windscribe-helper.service
+          # The units run absolute /opt/windscribe/... paths, which do not exist
+          # in this extracted tree, and systemd-analyze verify fails on a missing
+          # ExecStart. Verify a copy with that prefix pointed at the extracted
+          # payload instead. This runs before the install test, so it also covers
+          # the aarch64 builds, whose binaries cannot be installed on the runner.
+          for unit in usr/lib/systemd/system/windscribe-helper.service usr/lib/systemd/user/windscribe.service; do
+            [ -f "$unit" ] || continue
+            sed "s|/opt/windscribe|$PWD/opt/windscribe|g" "$unit" > "/tmp/$(basename "$unit")"
+            systemd-analyze verify "/tmp/$(basename "$unit")"
+          done
           if [ "$PACKAGE" = "windscribe" ]; then
             desktop-file-validate usr/share/applications/windscribe.desktop
             appstreamcli validate --no-net usr/share/metainfo/com.windscribe.desktop.metainfo.xml
-          else
-            systemd-analyze verify usr/lib/systemd/user/windscribe.service
           fi
       - name: Run rpmlint
         env:
