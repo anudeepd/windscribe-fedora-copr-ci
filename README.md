@@ -4,9 +4,9 @@
 it for Fedora by rewrapping the upstream prebuilt Linux RPMs with Fedora specs:
 
 - `windscribe` — the desktop GUI build, from
-  `windscribe_<version>_amd64_fedora.rpm`
+  `windscribe_<version>_{amd64,arm64}_fedora.rpm`
 - `windscribe-cli` — the headless command line build, from
-  `windscribe-cli_<version>_amd64_fedora.rpm`
+  `windscribe-cli_<version>_{amd64,arm64}_fedora.rpm`
 
 The two are separate upstream builds (their `Windscribe`/`helper`/`windscribe-cli`
 binaries and their `install-update` script all differ; only the CLI build ships
@@ -14,14 +14,24 @@ the per-user unit), and both own `/opt/windscribe`, so they are mutually
 exclusive — this repo declares `Conflicts:` between them so dnf says so plainly
 instead of drowning the user in file-conflict errors.
 
-Currently x86_64 only. Upstream also publishes aarch64 RPMs
-(`windscribe_<version>_arm64_fedora.rpm`, `windscribe-cli_<version>_arm64_fedora.rpm`);
-this repo does not cover them yet.
+Both architectures upstream publishes Fedora RPMs for are covered: x86_64 and
+aarch64. Each spec lists both architectures' RPMs and `%prep` unpacks the one
+matching the build target, so one SRPM builds both — COPR compiles nothing
+here, it just re-packs, and its aarch64 chroots build the aarch64 RPM natively.
 
 A GitHub Actions workflow runs daily at 12AM UTC to check the latest release
 from https://github.com/Windscribe/Desktop-App and rebuilds COPR only when a new
-version is published. Each downloaded RPM is verified against a recorded SHA256
-checksum before submission.
+version is published. Every downloaded RPM is verified against a recorded SHA256
+checksum for its own architecture before submission (`sources/SHA256SUMS` has a
+`<sha256>  <package>  <arch>  <version>` layout).
+
+The RPM build test workflow builds and verifies each package for both
+architectures: payload parity against the matching upstream RPM, rpmlint, the
+packaged desktop/AppStream/unit files, and a dependency resolution pass against
+the Fedora repositories for that architecture (`dnf install --assumeno
+--forcearch=<arch>`, which catches a dependency that exists on x86_64 but has no
+aarch64 build). Only x86_64 is install-tested: a runner cannot install an
+aarch64 RPM, and aarch64 users install the COPR-built RPM natively.
 
 The COPR project repository is available from:
 https://copr.fedorainfracloud.org/coprs/anudeepd/windscribe
@@ -36,20 +46,25 @@ as-is (see `specs/*.spec`).
 
 Everything else follows the guidelines:
 
-- `ExclusiveArch: x86_64` — matches upstream's prebuilt artifacts.
+- `ExclusiveArch: x86_64 aarch64` — matches upstream's prebuilt artifacts.
 - `%build` present (empty — nothing to compile) so rpm's build hooks run.
 - `%check` runs `desktop-file-validate` (on the packaged upstream desktop file)
   and `appstreamcli validate` (on the packaged AppStream metadata) inside the
   GUI build. The CLI build has neither file, so it has no `%check`.
-- `rpmlint` runs in CI on the built RPMs and passes clean: `rpmlintrc`
-  documents every inherent finding of a prebuilt-blob rewrap — the `/opt`
+- `rpmlint` runs in CI on the built RPMs of both architectures and passes clean:
+  `rpmlintrc` documents every inherent finding of a prebuilt-blob rewrap — the
+  `/opt`
   layout, the bundle's `RUNPATH`, the unstripped and statically linked prebuilt
   binaries, upstream's 2755/`windscribe` mode on the client binary, the private
   bundled `libwsnet.so` and its unversioned SONAME, the bundle's own TLS
   defaults and `gethostbyname` calls, the missing man page, the runtime-state
   file under `/etc`, the `%postun` cleanup of unowned runtime directories, the
   old FSF address in upstream's GPL text, and two dictionary misses in
-  `%description`. A finding that is not in that list fails the step.
+  `%description`. A finding that is not in that list fails the step. Findings
+  that only one architecture produces live in `rpmlintrc.<arch>` (currently just
+  the aarch64 payload's `#!/usr/bin/env bash` helper script); CI concatenates the
+  two files, because rpmlint reports a filter that matches nothing as an error
+  and the shared file must stay clean on x86_64.
 - `%doc README.md` ships this file with each package.
 - License provenance: `LICENSE` (the GPL-2.0 text upstream mirrors from the
   client's public sources) is fetched from the upstream release tag by
@@ -65,8 +80,9 @@ Everything else follows the guidelines:
   ELF-rewriting brp hooks rather than skipping them: `%__os_install_post` gates
   `brp-strip` and `brp-strip-comment-note` on `%__debug_package` being
   undefined, and with them active the payload's ELF files get rewritten. All
-  four strip hooks plus `add-det` are emptied in the specs, and `check-rpaths`
-  is unset too (the bundle's `RUNPATH=/opt/windscribe/lib` is load-bearing: it
+  four strip hooks plus `add-det` are emptied in the specs, `brp-mangle-shebangs`
+  is unset (the aarch64 RPM ships `#!/bin/bash` in its helper scripts, which the
+  hook would rewrite to `#!/usr/bin/bash`), and `check-rpaths` is unset too (the bundle's `RUNPATH=/opt/windscribe/lib` is load-bearing: it
   is the only way the loader finds the bundled `libwsnet.so`, `libcrypto.so.4`
   and `libssl.so.4`). The RPM build test workflow then verifies that every
   payload file present in both the upstream and the rebuilt RPM is
@@ -79,8 +95,8 @@ Everything else follows the guidelines:
   `sudo` for the CLI build only (its self-update path uses `sudo -k`);
   upstream declares both for both, plus `ethtool`, which nothing in the payload
   calls. No network access inside the buildroot.
-- The downloaded RPM is verified against a recorded SHA256 checksum before
-  submission to COPR.
+- The downloaded RPMs are verified against recorded SHA256 checksums (one per
+  architecture) before submission to COPR.
 
 ### Deltas from the upstream RPMs
 
@@ -94,9 +110,14 @@ their effects are expressed declaratively instead:
   rpm creates it before the payload is installed, so
   `%attr(2755,root,windscribe) /opt/windscribe/Windscribe` resolves (upstream's
   `chgrp` + `chmod 2755` did the same from `%post`).
-- `/usr/bin/windscribe-cli` and `/etc/windscribe/platform`
-  (`linux_rpm_x64` for the GUI build, `linux_rpm_x64_cli` for the CLI build) are
-  owned by `%files` instead of being created by a scriptlet.
+- `/usr/bin/windscribe-cli` and `/etc/windscribe/platform` are owned by
+  `%files` instead of being created by a scriptlet. The marker carries the
+  architecture as upstream's scriptlets spell it: `linux_rpm_x64` /
+  `linux_rpm_x64_cli` on x86_64, `linux_rpm_arm64` / `linux_rpm_arm64_cli` on
+  aarch64.
+- `/usr/lib/.build-id/` is packaged as upstream ships it: both architectures'
+  RPMs carry build-id links for the bundle's ELF files (the hashes differ, since
+  the binaries do).
 - The account is **not** deleted on uninstall, unlike upstream's `userdel`/
   `groupdel`: Fedora's guidelines forbid deleting accounts from package
   scriptlets.

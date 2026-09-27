@@ -24,6 +24,13 @@
 # payload. The payload must ship as upstream built it, so unset the hook.
 %undefine __brp_add_determinism
 
+# brp-mangle-shebangs rewrites the payload's scripts: the aarch64 RPM ships
+# /opt/windscribe/scripts/* with upstream's #!/bin/bash (and one with
+# #!/usr/bin/env bash), which the hook turns into #!/usr/bin/bash, so the
+# packaged bytes stop matching upstream. /bin is a symlink to /usr/bin on
+# Fedora, so upstream's shebang runs as is.
+%global __brp_mangle_shebangs %{nil}
+
 # check-rpaths rejects /opt/windscribe/lib (ERROR 0002: its whitelist is
 # /lib, /usr/lib, /usr/libexec and $ORIGIN). That RUNPATH is load-bearing and
 # cannot be dropped: the bundle carries its own libwsnet.so, libcrypto.so.4 and
@@ -45,25 +52,29 @@ Release:        %autorelease
 Summary:        VPN client (command line)
 License:        GPL-2.0-only
 URL:            https://windscribe.com
-ExclusiveArch:  x86_64
+# Both architectures upstream publishes Fedora RPMs for. COPR builds this one
+# SRPM in every chroot enabled for the project, and %%prep picks the payload
+# matching the build target.
+ExclusiveArch:  x86_64 aarch64
 
 # The CLI release RPM is a separate build, not a subset of the GUI one: its
 # Windscribe/helper/windscribe-cli binaries and its install-update script
 # differ, and it ships a per-user unit (windscribe.service) that the GUI RPM
 # does not.
 Source0:        https://github.com/Windscribe/Desktop-App/releases/download/v%{version}/windscribe-cli_%{version}_amd64_fedora.rpm
+Source1:        https://github.com/Windscribe/Desktop-App/releases/download/v%{version}/windscribe-cli_%{version}_arm64_fedora.rpm
 # Upstream ships no GPL text outside open_source_licenses.txt (which only covers
 # the bundled third-party components, and is kept in /opt as upstream ships it).
 # spectool fetches LICENSE for the exact version being packaged from the release
 # tag; a failed fetch fails the build, so the packaged license always matches
 # the packaged version.
-Source1:        https://raw.githubusercontent.com/Windscribe/Desktop-App/v%{version}/LICENSE
+Source2:        https://raw.githubusercontent.com/Windscribe/Desktop-App/v%{version}/LICENSE
 # Service account for the privileged helper. Upstream creates it in %post with
 # groupadd/useradd; rpm creates it from this sysusers entry instead, before the
 # payload is installed (so %attr below can resolve the group).
-Source2:        windscribe.sysusers.conf
+Source3:        windscribe.sysusers.conf
 # Repo README shipped as %%doc.
-Source3:        README.md
+Source4:        README.md
 
 BuildRequires:  cpio
 BuildRequires:  systemd-rpm-macros
@@ -121,10 +132,15 @@ service. This package is the command line build (windscribe-cli), rewrapped
 from the upstream prebuilt Fedora RPM for Fedora (COPR only).
 
 %prep
+%ifarch x86_64
 rpm2cpio %{SOURCE0} | cpio -idmu
-cp %{SOURCE1} LICENSE
+%endif
+%ifarch aarch64
+rpm2cpio %{SOURCE1} | cpio -idmu
+%endif
+cp %{SOURCE2} LICENSE
 # %%doc is copied from the build directory, not the buildroot.
-cp %{SOURCE3} README.md
+cp %{SOURCE4} README.md
 
 %build
 # Nothing to compile: the prebuilt upstream binary is unpacked in %%prep.
@@ -132,12 +148,17 @@ cp %{SOURCE3} README.md
 
 %install
 cp -a opt usr %{buildroot}/
-install -Dm0644 %{SOURCE2} %{buildroot}%{_sysusersdir}/windscribe.conf
-# Upstream's %post writes this per-architecture marker (linux_rpm_x64_cli on
-# x86_64, linux_rpm_arm64_cli on aarch64) that its self-update script reads
-# back. Ship the same content as a file instead of generating it in a scriptlet.
+install -Dm0644 %{SOURCE3} %{buildroot}%{_sysusersdir}/windscribe.conf
+# Upstream's %post writes this per-architecture marker that its self-update
+# script reads back (the values come from the scriptlets in each architecture's
+# RPM). Ship the same content as a file instead of generating it in a scriptlet.
 install -d %{buildroot}/etc/windscribe
+%ifarch x86_64
 printf 'linux_rpm_x64_cli\n' > %{buildroot}/etc/windscribe/platform
+%endif
+%ifarch aarch64
+printf 'linux_rpm_arm64_cli\n' > %{buildroot}/etc/windscribe/platform
+%endif
 chmod 0644 %{buildroot}/etc/windscribe/platform
 # Upstream's %post creates this symlink; own it in %%files instead so rpm
 # tracks what the package puts on PATH.
@@ -167,9 +188,9 @@ ln -s /opt/windscribe/windscribe-cli %{buildroot}%{_bindir}/windscribe-cli
 /opt/windscribe/windscribectrld
 /opt/windscribe/windscribeopenvpn
 /opt/windscribe/windscribewstunnel
-# Upstream's RPM carries /usr/lib/.build-id links to the bundle's ELF files.
-# The add-determinism hook is unset above, so they ship exactly as upstream
-# built them (no regenerated links, no dropped ones).
+# Upstream's RPM carries /usr/lib/.build-id links to the bundle's ELF files on
+# both architectures. The add-determinism hook is unset above, so they ship
+# exactly as upstream built them (no regenerated links, no dropped ones).
 /usr/lib/.build-id/
 /etc/windscribe/platform
 %{_sysusersdir}/windscribe.conf
@@ -232,3 +253,4 @@ fi
   owned by %%files, /etc/windscribe/platform shipped as a file
 - Keep every payload file byte-identical to upstream (brp strip hooks and
   check-rpaths unset)
+- Cover both architectures upstream publishes Fedora RPMs for (x86_64, aarch64)

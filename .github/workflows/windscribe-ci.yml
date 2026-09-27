@@ -17,6 +17,9 @@ env:
   COPR_URL: https://copr.fedorainfracloud.org
   REPO_DEV: Windscribe
   REPO_NAME: Desktop-App
+  # <rpm arch>:<arch token in the upstream asset name>. Upstream publishes one
+  # Fedora RPM per architecture; both are packaged from this one SRPM.
+  ARTIFACT_ARCHES: "x86_64:amd64 aarch64:arm64"
 jobs:
   GetLatestVersion:
     runs-on: ubuntu-latest
@@ -48,10 +51,8 @@ jobs:
         include:
           - package: windscribe
             metainfo: com.windscribe.desktop.metainfo.xml
-            artifact_glob: "windscribe_*_amd64_fedora.rpm"
           - package: windscribe-cli
             metainfo: ""
-            artifact_glob: "windscribe-cli_*_amd64_fedora.rpm"
     steps:
       # fedora:44 ships no git. Without it actions/checkout silently falls back
       # to downloading a source tarball, leaving no .git for the checksum
@@ -199,43 +200,54 @@ jobs:
           if [ "${{ inputs.force_build }}" = "true" ]; then
             sed -i "s/^Release:.*/Release: %{autorelease}.f${{ github.run_id }}/" specs/$PACKAGE.spec
           fi
-          # spectool fetches the upstream RPM (Source0) and LICENSE (Source1,
-          # from the release tag). No fallback: a failed fetch fails the build
-          # so the packaged license always matches the version being built.
+          # spectool fetches both architectures' upstream RPMs (Source0/Source1)
+          # and LICENSE (Source2, from the release tag). No fallback: a failed
+          # fetch fails the build so the packaged license always matches the
+          # version being built.
           cp sources/windscribe.sysusers.conf sources/com.windscribe.desktop.metainfo.xml README.md $HOME/rpmbuild/SOURCES/
           cp specs/$PACKAGE.spec $HOME/rpmbuild/SPECS/
           cd $HOME/rpmbuild/SPECS
           spectool -g -R $PACKAGE.spec
-          # Integrity check: the downloaded RPM must match the hash recorded
-          # in sources/SHA256SUMS for this package. First sighting of a new
-          # version records the hash (trust-on-first-use) and commits it back.
-          artifact=$(ls $HOME/rpmbuild/SOURCES/${{ matrix.artifact_glob }} 2>/dev/null | head -1)
-          if [ -z "$artifact" ]; then
-            echo "ERROR: no upstream RPM found in SOURCES for $PACKAGE"
-            exit 1
-          fi
-          HASH=$(sha256sum "$artifact" | awk '{print $1}')
-          EXPECTED=$(awk -v p="$PACKAGE" -v v="$VERSION_NO_V" '$2==p && $3==v {print $1}' "$GITHUB_WORKSPACE/sources/SHA256SUMS")
-          if [ -n "$EXPECTED" ]; then
-            if [ "$EXPECTED" != "$HASH" ]; then
-              echo "ERROR: checksum mismatch for $PACKAGE $VERSION_NO_V"
-              echo "expected: $EXPECTED"
-              echo "actual:   $HASH"
+          # Integrity check: every architecture's downloaded RPM must match the
+          # hash recorded in sources/SHA256SUMS for this package. First sighting
+          # of a new version records the hash (trust-on-first-use) and commits
+          # both architectures' entries back in one commit.
+          NEW_ENTRIES=""
+          for pair in $ARTIFACT_ARCHES; do
+            rpm_arch=${pair%%:*}
+            file_arch=${pair##*:}
+            artifact=$(ls $HOME/rpmbuild/SOURCES/${PACKAGE}_[0-9]*_${file_arch}_fedora.rpm 2>/dev/null | head -1)
+            if [ -z "$artifact" ]; then
+              echo "ERROR: no $file_arch upstream RPM found in SOURCES for $PACKAGE"
               exit 1
             fi
-            echo "Checksum OK for $PACKAGE $VERSION_NO_V"
-          else
-            echo "No recorded checksum for $PACKAGE $VERSION_NO_V — recording (trust-on-first-use)"
+            HASH=$(sha256sum "$artifact" | awk '{print $1}')
+            EXPECTED=$(awk -v p="$PACKAGE" -v a="$rpm_arch" -v v="$VERSION_NO_V" '$2==p && $3==a && $4==v {print $1}' "$GITHUB_WORKSPACE/sources/SHA256SUMS")
+            if [ -n "$EXPECTED" ]; then
+              if [ "$EXPECTED" != "$HASH" ]; then
+                echo "ERROR: checksum mismatch for $PACKAGE $VERSION_NO_V $rpm_arch"
+                echo "expected: $EXPECTED"
+                echo "actual:   $HASH"
+                exit 1
+              fi
+              echo "Checksum OK for $PACKAGE $VERSION_NO_V $rpm_arch"
+            else
+              echo "No recorded checksum for $PACKAGE $VERSION_NO_V $rpm_arch — recording (trust-on-first-use)"
+              NEW_ENTRIES=$(printf '%s\n%s  %s  %s  %s\n' "$NEW_ENTRIES" "$HASH" "$PACKAGE" "$rpm_arch" "$VERSION_NO_V" | grep -v '^$')
+            fi
+          done
+          if [ -n "$NEW_ENTRIES" ]; then
             # All git work happens via -C: rpmbuild below needs the cwd to stay
             # in $HOME/rpmbuild/SPECS.
             WS="$GITHUB_WORKSPACE"
             # Keep header comments and cap this package's recorded entries to
-            # the latest 3 versions, leaving the other package's entries alone.
+            # the latest 3 versions (2 architectures each), leaving the other
+            # package's entries alone.
             header=$(grep '^#' "$WS/sources/SHA256SUMS" || true)
             entries=$(grep -v '^#' "$WS/sources/SHA256SUMS" | grep -v '^$' || true)
             mine=$(printf '%s\n' "$entries" | awk -v p="$PACKAGE" '$2==p' || true)
             others=$(printf '%s\n' "$entries" | awk -v p="$PACKAGE" '$2!=p' || true)
-            mine=$(printf '%s\n%s  %s  %s\n' "$mine" "$HASH" "$PACKAGE" "$VERSION_NO_V" | grep -v '^$' | tail -n 3)
+            mine=$(printf '%s\n%s\n' "$mine" "$NEW_ENTRIES" | grep -v '^$' | tail -n 6)
             {
               printf '%s\n\n' "$header"
               printf '%s\n' "$mine"
@@ -244,7 +256,7 @@ jobs:
             git -C "$WS" config user.name "github-actions[bot]"
             git -C "$WS" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git -C "$WS" add sources/SHA256SUMS
-            git -C "$WS" commit -m "ci: record checksum for $PACKAGE $VERSION_NO_V"
+            git -C "$WS" commit -m "ci: record checksums for $PACKAGE $VERSION_NO_V"
             # The version patch earlier in this job leaves spec/appdata dirty, so
             # the rebase needs --autostash to keep the fast-forward push valid.
             git -C "$WS" pull --rebase --autostash origin "$(git -C "$WS" branch --show-current)" || true

@@ -10,23 +10,45 @@ jobs:
     container: fedora:44
     strategy:
       fail-fast: false
+      # One entry per package and architecture. Both architectures are built
+      # from the same SRPM; aarch64 is built with rpmbuild --target, which is
+      # enough here because nothing is compiled — the payload is upstream's
+      # prebuilt aarch64 RPM. COPR builds it natively in its aarch64 chroots.
       matrix:
         include:
           - package: windscribe
-            artifact_glob: "windscribe_*_amd64_fedora.rpm"
+            arch: x86_64
+            file_arch: amd64
             platform: linux_rpm_x64
             metadata: com.windscribe.desktop.metainfo.xml
+            install_test: true
             # Additions allowed on top of the upstream payload: the packaged
             # license/README, the sysusers entry, the generated platform marker,
             # the /usr/bin symlink and the curated AppStream metadata.
             allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe|usr/share/doc/windscribe/README\.md|usr/share/licenses|usr/share/licenses/windscribe|usr/share/licenses/windscribe/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|usr/share/metainfo|usr/share/metainfo/com\.windscribe\.desktop\.metainfo\.xml|etc|etc/windscribe|etc/windscribe/platform)$'
+          - package: windscribe
+            arch: aarch64
+            file_arch: arm64
+            platform: linux_rpm_arm64
+            metadata: com.windscribe.desktop.metainfo.xml
+            install_test: false
+            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe|usr/share/doc/windscribe/README\.md|usr/share/licenses|usr/share/licenses/windscribe|usr/share/licenses/windscribe/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|usr/share/metainfo|usr/share/metainfo/com\.windscribe\.desktop\.metainfo\.xml|etc|etc/windscribe|etc/windscribe/platform)$'
           - package: windscribe-cli
-            artifact_glob: "windscribe-cli_*_amd64_fedora.rpm"
+            arch: x86_64
+            file_arch: amd64
             platform: linux_rpm_x64_cli
             metadata: ""
+            install_test: true
             # Same as above minus the AppStream metadata (the CLI build ships
             # neither a desktop file nor metadata). %doc/%license land under
             # this package's own name, so those paths differ from the GUI build.
+            allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|etc|etc/windscribe|etc/windscribe/platform)$'
+          - package: windscribe-cli
+            arch: aarch64
+            file_arch: arm64
+            platform: linux_rpm_arm64_cli
+            metadata: ""
+            install_test: false
             allowed_additions: '^\./(usr/bin|usr/bin/windscribe-cli|usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf|etc|etc/windscribe|etc/windscribe/platform)$'
     steps:
       # fedora:44 ships no git, so actions/checkout would silently fall back to
@@ -60,7 +82,7 @@ jobs:
           if [ -n "$METADATA" ]; then
             sed -i "s|<release version=\"[^\"]*\" date=\"[^\"]*\"|<release version=\"${{ steps.step_version.outputs.VERSION_NO_V }}\" date=\"$(date +%F)\"|" sources/$METADATA
           fi
-          head -18 specs/${{ matrix.package }}.spec
+          head -20 specs/${{ matrix.package }}.spec
       - name: Validate curated AppStream metadata
         env:
           METADATA: ${{ matrix.metadata }}
@@ -73,29 +95,34 @@ jobs:
       - name: Build RPM locally
         env:
           PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
         run: |
           rpmdev-setuptree
-          # spectool fetches the upstream RPM (Source0) and LICENSE (Source1,
-          # from the release tag). No fallback: a failed fetch fails the build.
+          # spectool fetches both architectures' upstream RPMs (Source0/Source1)
+          # and LICENSE (Source2, from the release tag). No fallback: a failed
+          # fetch fails the build.
           cp sources/windscribe.sysusers.conf sources/com.windscribe.desktop.metainfo.xml README.md $HOME/rpmbuild/SOURCES/
           cp specs/$PACKAGE.spec $HOME/rpmbuild/SPECS/
           cd $HOME/rpmbuild/SPECS
           spectool -g -R $PACKAGE.spec
-          rpmbuild -ba $PACKAGE.spec 2>&1 | tail -15
-          ls -lh $HOME/rpmbuild/RPMS/x86_64/
+          rpmbuild -ba --target "$ARCH" $PACKAGE.spec 2>&1 | tail -15
+          ls -lh $HOME/rpmbuild/RPMS/$ARCH/
       - name: Verify the payload matches upstream apart from the documented deltas
         env:
           ALLOWED_ADDITIONS: ${{ matrix.allowed_additions }}
-          ARTIFACT_GLOB: ${{ matrix.artifact_glob }}
           PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
+          FILE_ARCH: ${{ matrix.file_arch }}
         run: |
           # The contract is that every file the upstream RPM ships is packaged
           # byte for byte; the only intended deltas are the documented additions
           # (see README). Fedora's default brp hooks rewrite any ELF they see and
           # check-rpaths rejects the bundle's RUNPATH, so without this check a
           # silent macro change would only show up as a quietly different binary.
-          upstream=$(ls $HOME/rpmbuild/SOURCES/$ARTIFACT_GLOB | head -1)
-          built=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.rpm | grep -v debug | head -1)
+          upstream=$(ls $HOME/rpmbuild/SOURCES/${PACKAGE}_[0-9]*_${FILE_ARCH}_fedora.rpm | head -1)
+          built=$(ls $HOME/rpmbuild/RPMS/$ARCH/$PACKAGE-[0-9]*.$ARCH.rpm | grep -v debug | head -1)
+          echo "upstream: $upstream"
+          echo "built:    $built"
           rm -rf /tmp/payload-upstream /tmp/payload-built
           mkdir -p /tmp/payload-upstream /tmp/payload-built
           (cd /tmp/payload-upstream && rpm2cpio "$upstream" | cpio -idm --quiet)
@@ -126,21 +153,51 @@ jobs:
             fi
           done <<< "$additions"
           if [ "$fail" -ne 0 ]; then exit 1; fi
-          echo "### Payload matches upstream apart from the documented additions :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY
+          echo "### Payload matches upstream apart from the documented additions ($PACKAGE $ARCH) :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY
       - name: Inspect built RPM Requires
         env:
           PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/$ARCH/$PACKAGE-[0-9]*.$ARCH.rpm | grep -v debug | head -1)
           echo "=== Built RPM: $rpm_file ==="
           rpm -qpR "$rpm_file"
           echo "REQUIRES_OUTPUT_END"
+      - name: Check every generated dependency resolves for this architecture
+        env:
+          PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          # Resolve the package against the real Fedora repositories for its own
+          # architecture and decline the transaction: this catches a dependency
+          # that exists on x86_64 but has no aarch64 build (which would only
+          # show up when a user installs from COPR). --use-host-config borrows
+          # the container's repos; nothing is downloaded or installed.
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/$ARCH/$PACKAGE-[0-9]*.$ARCH.rpm | grep -v debug | head -1)
+          rm -rf /tmp/installroot
+          set +e
+          dnf install --assumeno --use-host-config --installroot=/tmp/installroot \
+            --releasever="$(rpm -E %fedora)" --forcearch="$ARCH" "$rpm_file" > /tmp/resolve.log 2>&1
+          rc=$?
+          set -e
+          if grep -qE "nothing provides|No match for argument" /tmp/resolve.log; then
+            echo "ERROR: unsatisfiable dependencies for $PACKAGE $ARCH:"
+            grep -E "nothing provides|No match for argument" /tmp/resolve.log
+            exit 1
+          fi
+          # dnf prints the transaction as a table; report its row count and the
+          # first few rows so a surprising resolution is visible in the log.
+          awk '/^(Installing|Upgrading):/{flag=1} /^Transaction Summary:/{flag=0}
+               flag && /^ / {n++; if (n<=5) print}
+               END {print "packages in the resolved transaction: " n+0}' /tmp/resolve.log
+          grep -E "^(Total size|After this operation)" /tmp/resolve.log || true
+          echo "(dnf exited $rc after the declined transaction, which is expected)"
       - name: Validate packaged desktop, AppStream metadata and units
         env:
           PACKAGE: ${{ matrix.package }}
-          METADATA: ${{ matrix.metadata }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/$ARCH/$PACKAGE-[0-9]*.$ARCH.rpm | grep -v debug | head -1)
           rm -rf /tmp/rpmbuild-check
           mkdir -p /tmp/rpmbuild-check
           cd /tmp/rpmbuild-check
@@ -155,15 +212,26 @@ jobs:
       - name: Run rpmlint
         env:
           PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
-          rpmlint -r "$GITHUB_WORKSPACE/rpmlintrc" "$rpm_file"
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/$ARCH/$PACKAGE-[0-9]*.$ARCH.rpm | grep -v debug | head -1)
+          # Shared filters plus the architecture-specific ones (an unused filter
+          # is itself an error, so they cannot be merged into one file).
+          cat "$GITHUB_WORKSPACE/rpmlintrc" "$GITHUB_WORKSPACE/rpmlintrc.$ARCH" > /tmp/rpmlintrc
+          rpmlint -r /tmp/rpmlintrc "$rpm_file"
       - name: Install-test the rebuilt RPM
+        if: matrix.install_test
         env:
           PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          rpm_file=$(ls $HOME/rpmbuild/RPMS/x86_64/$PACKAGE-[0-9]*.x86_64.rpm | grep -v debug | head -1)
+          # Only the runner's own architecture can be installed here: dnf cannot
+          # install an aarch64 RPM on an x86_64 host. The aarch64 builds are
+          # verified by the payload parity, rpmlint and dependency-resolution
+          # steps above, and are installed natively from COPR by aarch64 users
+          # (COPR builds them in its own aarch64 chroots).
+          rpm_file=$(ls $HOME/rpmbuild/RPMS/$ARCH/$PACKAGE-[0-9]*.$ARCH.rpm | grep -v debug | head -1)
           echo "=== Installing $rpm_file (expect the declared tools + libs pulled) ==="
           dnf in -y "$rpm_file" 2>&1 | tail -30
           rpm -q "$PACKAGE"
@@ -190,4 +258,4 @@ jobs:
             systemd-analyze verify /usr/lib/systemd/user/windscribe.service
           fi
           systemd-analyze verify /usr/lib/systemd/system/windscribe-helper.service
-          echo "### Install test passed ($PACKAGE) :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY
+          echo "### Install test passed ($PACKAGE $ARCH) :heavy_check_mark:" >> $GITHUB_STEP_SUMMARY

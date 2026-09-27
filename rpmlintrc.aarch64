@@ -1,0 +1,10 @@
+# Appended to rpmlintrc for aarch64 builds (rpmlint errors on a filter that
+# matches nothing, so arch-only findings cannot live in the shared file: on
+# x86_64 this filter would be reported as unused-rpmlintrc-filter).
+
+# The aarch64 upstream RPM ships /opt/windscribe/scripts/update-systemd-resolved
+# with a #!/usr/bin/env bash shebang, while the x86_64 one uses #!/usr/bin/bash.
+# It is upstream's file, shipped byte-identical to upstream — brp-mangle-shebangs
+# is unset in the specs for exactly that reason (it would rewrite the aarch64
+# payload's scripts and break that).
+addFilter("env-script-interpreter")

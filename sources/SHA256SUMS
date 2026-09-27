@@ -1,10 +1,12 @@
 # SHA256SUMS for the upstream Windscribe release artifacts.
-# Format: <sha256>  <package>  <version>
-# CI records each version's hash on first sight (trust-on-first-use) and fails
-# subsequent builds if the downloaded artifact does not match the recorded hash.
-# Package is the SRPM/COPR package name: windscribe (GUI build) downloads
-# windscribe_<version>_amd64_fedora.rpm, windscribe-cli downloads
-# windscribe-cli_<version>_amd64_fedora.rpm.
+# Format: <sha256>  <package>  <arch>  <version>
+# arch is the RPM architecture: x86_64 for the _amd64_fedora.rpm assets, aarch64
+# for the _arm64_fedora.rpm ones. Package is the SRPM/COPR package name.
+# CI records each version's hash per architecture on first sight
+# (trust-on-first-use) and fails subsequent builds if the downloaded artifact
+# does not match the recorded hash.
 
-7f37792789fea5299325f4b121cb3a347c088fa38d5311f4f13aaac3684c30f8  windscribe  2.24.13
-e67e642e21d02da32b1329c7c230f5570f296f4a59fa898dcef242eee1f02cbe  windscribe-cli  2.24.13
+7f37792789fea5299325f4b121cb3a347c088fa38d5311f4f13aaac3684c30f8  windscribe  x86_64  2.24.13
+217d4a82a8752d85214c1e44f86634e0e11bad2f6d6a9c8d99d7df055aa008ec  windscribe  aarch64  2.24.13
+e67e642e21d02da32b1329c7c230f5570f296f4a59fa898dcef242eee1f02cbe  windscribe-cli  x86_64  2.24.13
+35bd6cedf9ec1024563cf85906f6d0ebfd7eb8025a9220a7979f81de9f6ee4da  windscribe-cli  aarch64  2.24.13

@@ -1,0 +1,5 @@
+# No x86_64-only findings. Everything rpmlint reports for the x86_64 builds is
+# covered by the shared filters in rpmlintrc, which is always loaded first; this
+# file exists so the CI can concatenate rpmlintrc + rpmlintrc.<arch> for every
+# architecture. See rpmlintrc.aarch64 for the one finding that only the aarch64
+# payload has.
