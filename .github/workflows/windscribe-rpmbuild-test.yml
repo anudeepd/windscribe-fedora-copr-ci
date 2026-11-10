@@ -7,7 +7,7 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    container: fedora:44
+    container: fedora:45
     strategy:
       fail-fast: false
       # One entry per package and architecture. Both architectures are built
@@ -51,7 +51,7 @@ jobs:
             install_test: false
             allowed_additions: '^\./(usr/share|usr/share/doc|usr/share/doc/windscribe-cli|usr/share/doc/windscribe-cli/README\.md|usr/share/licenses|usr/share/licenses/windscribe-cli|usr/share/licenses/windscribe-cli/LICENSE|usr/lib/sysusers\.d|usr/lib/sysusers\.d/windscribe\.conf)$'
     steps:
-      # fedora:44 ships no git, so actions/checkout would silently fall back to
+      # fedora:45 ships no git, so actions/checkout would silently fall back to
       # downloading a source tarball and leave no .git behind.
       - name: Install git
         run: sudo dnf install -y -q git
