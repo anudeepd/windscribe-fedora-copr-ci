@@ -6,9 +6,11 @@
 # (trust-on-first-use) and fails subsequent builds if the downloaded artifact
 # does not match the recorded hash.
 
+e67e642e21d02da32b1329c7c230f5570f296f4a59fa898dcef242eee1f02cbe  windscribe-cli  x86_64  2.24.13
+35bd6cedf9ec1024563cf85906f6d0ebfd7eb8025a9220a7979f81de9f6ee4da  windscribe-cli  aarch64  2.24.13
+8a7272040adf1ed2e9aea7bcfe9889149eb15f8789eaeec25326de242c1a590a  windscribe-cli  x86_64  2.25.8
+ba6a162a428312d06a5caf8e413c147a7e78be500e6a6585d00cbd4459229bef  windscribe-cli  aarch64  2.25.8
 7f37792789fea5299325f4b121cb3a347c088fa38d5311f4f13aaac3684c30f8  windscribe  x86_64  2.24.13
 217d4a82a8752d85214c1e44f86634e0e11bad2f6d6a9c8d99d7df055aa008ec  windscribe  aarch64  2.24.13
 d8582ef74165835fd18640490c52e256b02b0cca75c6b7e9d548987237edd990  windscribe  x86_64  2.25.8
 606045395d63f93ec38491bce55764e50ee69cb8b3115d1fb9ada92883c859e7  windscribe  aarch64  2.25.8
-e67e642e21d02da32b1329c7c230f5570f296f4a59fa898dcef242eee1f02cbe  windscribe-cli  x86_64  2.24.13
-35bd6cedf9ec1024563cf85906f6d0ebfd7eb8025a9220a7979f81de9f6ee4da  windscribe-cli  aarch64  2.24.13
